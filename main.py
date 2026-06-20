@@ -592,6 +592,7 @@ def main():
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("menu", menu_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("myorders", myorders_command))
 
     # Manager commands
     app.add_handler(CommandHandler("orders", orders_command))
