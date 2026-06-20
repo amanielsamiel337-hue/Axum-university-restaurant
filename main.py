@@ -203,7 +203,8 @@ def get_student_orders(student_id):
     cursor = conn.cursor()
     cursor.execute("""
         SELECT order_id, food_name, quantity, price_total, status, timestamp
-        FROM orders WHERE student_id = ?
+        FROM orders
+        WHERE student_id = ?
         ORDER BY timestamp DESC
         LIMIT 5
     """, (student_id,))
@@ -246,6 +247,47 @@ def update_availability(food_name, available):
     """, (available, food_name))
     conn.commit()
     conn.close()
+
+
+    # ============================================
+# NEW HELPER FUNCTION
+# Sends a message to any student by their ID
+# Does not require them to have messaged first
+# ============================================
+
+async def notify_student(bot, student_id, message_text):
+    # bot is the Telegram bot object - it can send messages
+    # to ANY chat ID, not just ones that just messaged us
+    try:
+        await bot.send_message(
+            chat_id=student_id,
+            text=message_text,
+            parse_mode="Markdown"
+        )
+        return True
+    except Exception as e:
+        # This can fail if the student blocked the bot
+        # or never started a chat with it - we handle that gracefully
+        print(f"Could not notify student {student_id}: {e}")
+        return False
+
+# ============================================
+# UPDATED FUNCTION — needed to get the
+# student_id and food details for an order
+# ============================================
+
+def get_order_details(order_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT student_id, student_name, food_name, quantity
+        FROM orders
+        WHERE order_id = ?
+    """, (order_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+    # Returns None if no order with that ID exists
 
 # ============================================
 # AI BRAIN
@@ -338,7 +380,7 @@ async def start_command(update: Update,
     reply_markup = ReplyKeyboardMarkup(
         keyboard, resize_keyboard=True)
     await update.message.reply_text(
-        "👋 Welcome to the AAU Restaurant Bot!\n\n"
+        "👋 Welcome to the AU Restaurant Bot!\n\n"
         "I help you pre-order your wot and skip the queue.\n\n"
         "Just tell me what you want or use the buttons below.",
         reply_markup=reply_markup
@@ -402,19 +444,58 @@ async def orders_command(update: Update,
                  f"🍲 {o[2]} x{o[3]} — {o[4]} birr\n\n")
     await update.message.reply_text(text, parse_mode="Markdown")
 
+
 async def ready_command(update: Update,
                         context: ContextTypes.DEFAULT_TYPE):
     if not is_manager(update.message.from_user.id):
         await update.message.reply_text("Staff only.")
         return
+
     try:
         order_id = int(context.args[0])
-        mark_order_ready(order_id)
-        await update.message.reply_text(
-            f"✅ Order #{order_id} marked as ready.")
     except:
         await update.message.reply_text(
             "Usage: /ready [order number]")
+        return
+
+    # Get the order details BEFORE marking it ready
+    # We need the student_id to know who to notify
+    order = get_order_details(order_id)
+
+    if order is None:
+        await update.message.reply_text(
+            f"No order found with number {order_id}.")
+        return
+
+    student_id, student_name, food_name, quantity = order
+
+    # Mark it ready in the database - same as before
+    mark_order_ready(order_id)
+
+    # Confirm to the manager
+    await update.message.reply_text(
+        f"✅ Order #{order_id} marked as ready.\n"
+        f"Notifying {student_name} now..."
+    )
+
+    # THE NEW PART - notify the actual student
+    notification_sent = await notify_student(
+        context.bot,
+        student_id,
+        f"🍲 *Your order is ready!*\n\n"
+        f"Order #{order_id} — {food_name} x{quantity}\n"
+        f"Please come collect it at the counter now."
+    )
+
+    # Tell the manager whether it worked
+    if notification_sent:
+        await update.message.reply_text(
+            f"✅ {student_name} has been notified.")
+    else:
+        await update.message.reply_text(
+            f"⚠️ Could not reach {student_name}. "
+            f"They may need to message the bot first."
+        )
 
 async def soldout_command(update: Update,
                           context: ContextTypes.DEFAULT_TYPE):
@@ -477,7 +558,7 @@ async def handle_message(update: Update,
 def main():
     setup_database()
     seed_initial_data()
-    print("AAU Restaurant Bot starting...")
+    print("AU Restaurant Bot starting...")
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
