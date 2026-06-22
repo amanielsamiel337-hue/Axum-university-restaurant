@@ -422,6 +422,15 @@ async def notify_staff_group(bot, order_id, student_name, food_name, quantity, p
         print(f"Could not notify staff group: {e}")
 
 # ============================================
+# OPENING HOURS CHECK
+# Restaurant open 6:00 AM to 10:00 PM
+# ============================================
+
+def is_restaurant_open():
+    now = datetime.now()
+    return 6 <= now.hour < 22
+
+# ============================================
 # AI BRAIN
 # ============================================
 
@@ -774,6 +783,7 @@ async def confirmpay_command(update: Update,
 
 async def handle_message(update: Update,
                          context: ContextTypes.DEFAULT_TYPE):
+
     student_id = str(update.message.from_user.id)
     student_name = update.message.from_user.first_name or "Student"
     student_message = update.message.text
