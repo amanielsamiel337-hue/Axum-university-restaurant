@@ -35,6 +35,9 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "restaurant.db")
 RESTAURANT_TELEBIRR_NUMBER = "0991004736"  
 RESTAURANT_NAME = "AXUM UNI Student Restaurant"
 
+# The Telegram group ID for restaurant staff
+STAFF_GROUP_ID = os.getenv("STAFF_GROUP_ID")
+
 
 # ============================================
 # DATABASE FUNCTIONS
@@ -389,10 +392,40 @@ def get_awaiting_payment_orders():
 
 
 # ============================================
+# NOTIFY STAFF GROUP
+# Called every time a new order is placed
+# Posts the order into the staff Telegram group
+# ============================================
+
+async def notify_staff_group(bot, order_id, student_name, food_name, quantity, price_total):
+    if not STAFF_GROUP_ID:
+        # If no group is set up yet, silently skip
+        # This way the bot still works even before the group is ready
+        return
+    
+    message = (
+        f"🆕 *New Order — #{order_id}*\n\n"
+        f"👤 {student_name}\n"
+        f"🍲 {food_name} x{quantity}\n"
+        f"💰 {price_total} birr\n\n"
+        f"💳 Awaiting payment — check your Telebirr app\n"
+        f"Then use: /confirmpay {order_id}"
+    )
+    
+    try:
+        await bot.send_message(
+            chat_id=STAFF_GROUP_ID,
+            text=message,
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        print(f"Could not notify staff group: {e}")
+
+# ============================================
 # AI BRAIN
 # ============================================
 
-def process_message(student_id, student_name, student_message):
+async def process_message(student_id, student_name, student_message,context):
     history = load_conversation(student_id)
     menu = load_menu()
 
@@ -479,8 +512,13 @@ def process_message(student_id, student_name, student_message):
                     student_id, student_name, 
                     food_name, quantity, price)
                 
-                # CHANGED - instead of confirming immediately
-                # we now ask for payment first
+                # Notify staff group the moment order is placed
+                await notify_staff_group(
+                    context.bot, order_id, student_name,
+                    food_name, quantity, price
+                )
+
+
                 final_reply = (
                     f"{friendly}\n\n"
                     f"📝 Order #{order_id} reserved\n"
@@ -746,7 +784,7 @@ async def handle_message(update: Update,
     )
 
     try:
-        reply = process_message(student_id, student_name, student_message)
+        reply = await process_message(student_id, student_name, student_message, context)
     except Exception as e:
         print(f"Unexpected error: {e}")
         reply = "Something went wrong. Please try again."
