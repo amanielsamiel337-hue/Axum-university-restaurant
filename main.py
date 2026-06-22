@@ -28,6 +28,15 @@ groq_client = Groq(api_key=GROQ_API_KEY)
 DB_PATH = os.path.join(os.path.dirname(__file__), "restaurant.db")
 
 # ============================================
+# RESTAURANT PAYMENT INFO
+# Store this once - your actual Telebirr number
+# ============================================
+
+RESTAURANT_TELEBIRR_NUMBER = "0991004736"  
+RESTAURANT_NAME = "AXUM UNI Student Restaurant"
+
+
+# ============================================
 # DATABASE FUNCTIONS
 # ============================================
 
@@ -179,20 +188,24 @@ def load_conversation(student_id):
     conn.close()
     return [{"role": r[0], "content": r[1]} for r in rows]
 
+
 def save_order(student_id, student_name, food_name, quantity, price_total):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE menu
-        SET portions_left = portions_left - ?
-        WHERE food_name = ?
-    """, (quantity, food_name))
+    
+    # NOTICE - we do NOT deduct portions yet
+    # We only deduct portions once payment is confirmed
+    # This protects against students reserving food they never pay for
+    
     cursor.execute("""
         INSERT INTO orders
-        (student_id, student_name, food_name, quantity, price_total, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?)
+        (student_id, student_name, food_name, quantity, 
+         price_total, status, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (student_id, student_name, food_name, quantity,
-          price_total, datetime.now().strftime("%Y-%m-%d %H:%M")))
+          price_total, "awaiting_payment",
+          datetime.now().strftime("%Y-%m-%d %H:%M")))
+    
     order_id = cursor.lastrowid
     conn.commit()
     conn.close()
@@ -289,6 +302,92 @@ def get_order_details(order_id):
     return row
     # Returns None if no order with that ID exists
 
+
+    
+# ============================================
+# NEW FUNCTION — confirm payment
+# Manager runs this after checking their Telebirr 
+# app and seeing the money actually arrived
+# ============================================
+
+def confirm_payment(order_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # First get the order details so we know
+    # what food and quantity to deduct
+    cursor.execute("""
+        SELECT food_name, quantity, status
+        FROM orders
+        WHERE order_id = ?
+    """, (order_id,))
+    result = cursor.fetchone()
+    
+    if result is None:
+        conn.close()
+        return False, "Order not found"
+    
+    food_name, quantity, current_status = result
+    
+    # IMPORTANT CHECK - only confirm if it's actually 
+    # awaiting payment - this enforces our state machine
+    # Cannot confirm an order that's already confirmed
+    if current_status != "awaiting_payment":
+        conn.close()
+        return False, f"Order is already {current_status}"
+    
+    # Check portions are still available 
+    # (someone else might have taken the last one)
+    cursor.execute("""
+        SELECT portions_left
+        FROM menu 
+        WHERE food_name = ?
+    """, (food_name,))
+    menu_result = cursor.fetchone()
+    
+    if menu_result[0] < quantity:
+        conn.close()
+        return False, "Not enough portions left anymore"
+    
+    # Now deduct portions and update status together
+    cursor.execute("""
+        UPDATE menu
+        SET portions_left = portions_left - ?
+        WHERE food_name = ?
+    """, (quantity, food_name))
+    
+    cursor.execute("""
+        UPDATE orders
+        SET status = 'confirmed' 
+        WHERE order_id = ?
+    """, (order_id,))
+    
+    conn.commit()
+    conn.close()
+    return True, "Payment confirmed"
+
+
+
+# ============================================
+# NEW FUNCTION — get orders awaiting payment
+# So manager can see what needs checking
+# ============================================
+
+def get_awaiting_payment_orders():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT order_id, student_id, student_name, 
+               food_name, quantity, price_total, timestamp
+        FROM orders 
+        WHERE status = 'awaiting_payment'
+        ORDER BY timestamp ASC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
 # ============================================
 # AI BRAIN
 # ============================================
@@ -372,18 +471,27 @@ def process_message(student_id, student_name, student_message):
             order_data = json.loads(parts[1].strip())
             food_name = order_data["food_name"]
             quantity = order_data["quantity"]
+            menu = load_menu()
 
             if food_name in menu and menu[food_name]["portions_left"] >= quantity:
                 price = menu[food_name]["price"] * quantity
                 order_id = save_order(
-                    student_id, student_name,
+                    student_id, student_name, 
                     food_name, quantity, price)
+                
+                # CHANGED - instead of confirming immediately
+                # we now ask for payment first
                 final_reply = (
                     f"{friendly}\n\n"
-                    f"✅ Order #{order_id} confirmed\n"
+                    f"📝 Order #{order_id} reserved\n"
                     f"🍲 {food_name} x{quantity}\n"
-                    f"💰 {price} birr\n"
-                    f"📱 Show this message at the counter"
+                    f"💰 Total: {price} birr\n\n"
+                    f"💳 *To confirm your order, pay now:*\n"
+                    f"Send {price} birr via Telebirr to:\n"
+                    f"*{RESTAURANT_TELEBIRR_NUMBER}*\n"
+                    f"({RESTAURANT_NAME})\n\n"
+                    f"After paying, send me your transaction ID "
+                    f"or a screenshot, mentioning Order #{order_id}"
                 )
             else:
                 final_reply = "Sorry, that item is not available right now."
@@ -553,6 +661,74 @@ async def addmanager_command(update: Update,
     except:
         await update.message.reply_text(
             "Usage: /addmanager [telegram_id] [name]")
+        
+
+        
+# ============================================
+# NEW MANAGER COMMAND — /pending
+# Shows orders waiting for payment verification
+# ============================================
+
+async def pending_command(update: Update,
+                          context: ContextTypes.DEFAULT_TYPE):
+    if not is_manager(update.message.from_user.id):
+        await update.message.reply_text("Staff only.")
+        return
+    
+    pending = get_awaiting_payment_orders()
+    
+    if not pending:
+        await update.message.reply_text(
+            "No orders awaiting payment confirmation.")
+        return
+    
+    text = "💳 *Awaiting Payment Confirmation*\n\n"
+    for o in pending:
+        text += (f"Order #{o[0]} — {o[6]}\n"
+                 f"👤 {o[2]}\n"
+                 f"🍲 {o[3]} x{o[4]} — {o[5]} birr\n\n")
+    text += "Check your Telebirr app, then use:\n/confirmpay [order number]"
+    
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+# ============================================
+# NEW MANAGER COMMAND — /confirmpay
+# Manager runs this AFTER checking their 
+# actual Telebirr app and seeing money arrived
+# ============================================
+
+async def confirmpay_command(update: Update,
+                             context: ContextTypes.DEFAULT_TYPE):
+    if not is_manager(update.message.from_user.id):
+        await update.message.reply_text("Staff only.")
+        return
+    
+    try:
+        order_id = int(context.args[0])
+    except:
+        await update.message.reply_text(
+            "Usage: /confirmpay [order number]")
+        return
+    
+    success, message = confirm_payment(order_id)
+    
+    if success:
+        # Get student info to notify them
+        order = get_order_details(order_id)
+        student_id, student_name, food_name, quantity = order
+        
+        await update.message.reply_text(
+            f"✅ Order #{order_id} payment confirmed.")
+        
+        # Notify the student their payment worked
+        await notify_student(
+            context.bot, student_id,
+            f"✅ *Payment confirmed!*\n\n"
+            f"Order #{order_id} — {food_name} x{quantity}\n"
+            f"We'll notify you when it's ready for pickup."
+        )
+    else:
+        await update.message.reply_text(f"⚠️ {message}")
 
 # ============================================
 # MESSAGE HANDLER
@@ -599,6 +775,8 @@ def main():
     app.add_handler(CommandHandler("ready", ready_command))
     app.add_handler(CommandHandler("soldout", soldout_command))
     app.add_handler(CommandHandler("addmanager", addmanager_command))
+    app.add_handler(CommandHandler("pending", pending_command))
+    app.add_handler(CommandHandler("confirmpay", confirmpay_command))
 
     # Free text
     app.add_handler(MessageHandler(filters.TEXT, handle_message))
