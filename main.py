@@ -802,11 +802,47 @@ async def confirmpay_command(update: Update,
             f"✅ *Payment confirmed!*\n\n"
             f"Order #{order_id} — {food_name} x{quantity}\n\n"
             f"📊 You are *#{position}* in queue\n"
-            f"⏱ Estimated wait: *~{wait_text} minutes*\n\n"
+            f"⏱ {wait_text}\n\n"
             f"We'll notify you when it's ready for pickup."
         )
     else:
         await update.message.reply_text(f"⚠️ {message}")
+
+
+# ============================================
+# PHOTO HANDLER
+# When a student sends a payment screenshot,
+# forward it to the staff group automatically
+# ============================================
+
+async def handle_photo(update: Update,
+                       context: ContextTypes.DEFAULT_TYPE):
+    student_name = update.message.from_user.first_name or "Student"
+    student_id = str(update.message.from_user.id)
+
+    # Tell the student we got it
+    await update.message.reply_text(
+        "📸 Screenshot received! Staff will verify your payment shortly."
+    )
+
+    # Forward the photo to the staff group
+    if STAFF_GROUP_ID:
+        try:
+            await context.bot.forward_message(
+                chat_id=STAFF_GROUP_ID,
+                from_chat_id=update.effective_chat.id,
+                message_id=update.message.message_id
+            )
+            # Send a note so staff knows who sent it
+            await context.bot.send_message(
+                chat_id=STAFF_GROUP_ID,
+                text=f"👆 Payment screenshot from *{student_name}*",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            print(f"Could not forward screenshot: {e}")
+
+
 
 # ============================================
 # MESSAGE HANDLER
@@ -859,6 +895,7 @@ def main():
 
     # Free text
     app.add_handler(MessageHandler(filters.TEXT, handle_message))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
     print("Bot is running 24/7.")
     app.run_polling()
