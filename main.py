@@ -430,6 +430,26 @@ def is_restaurant_open():
     now = datetime.now()
     return 6 <= now.hour < 23
 
+
+# ============================================
+# QUEUE POSITION
+# Counts how many confirmed orders are ahead
+# of this one — used to estimate wait time
+# ============================================
+
+def get_queue_position(order_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COUNT(*) FROM orders
+        WHERE status = 'confirmed'
+        AND order_id < ?
+    """, (order_id,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    # Position is count of orders ahead, plus 1 for themselves
+    return count + 1
+
 # ============================================
 # AI BRAIN
 # ============================================
@@ -771,11 +791,17 @@ async def confirmpay_command(update: Update,
         await update.message.reply_text(
             f"✅ Order #{order_id} payment confirmed.")
         
+# Calculate queue position and wait time
+        position = get_queue_position(order_id)
+        wait_minutes = (position - 1) * 25
+
         # Notify the student their payment worked
         await notify_student(
             context.bot, student_id,
             f"✅ *Payment confirmed!*\n\n"
-            f"Order #{order_id} — {food_name} x{quantity}\n"
+            f"Order #{order_id} — {food_name} x{quantity}\n\n"
+            f"📊 You are *#{position}* in queue\n"
+            f"⏱ Estimated wait: *~{wait_minutes} minutes*\n\n"
             f"We'll notify you when it's ready for pickup."
         )
     else:
