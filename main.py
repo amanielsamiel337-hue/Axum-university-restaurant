@@ -794,6 +794,7 @@ async def confirmpay_command(update: Update,
 # Calculate queue position and wait time
         position = get_queue_position(order_id)
         wait_minutes = (position - 1) * 25
+        wait_text = "Your order is first in queue! 🎉" if position == 1 else f"Estimated wait: *~{wait_minutes} minutes*"
 
         # Notify the student their payment worked
         await notify_student(
@@ -801,7 +802,7 @@ async def confirmpay_command(update: Update,
             f"✅ *Payment confirmed!*\n\n"
             f"Order #{order_id} — {food_name} x{quantity}\n\n"
             f"📊 You are *#{position}* in queue\n"
-            f"⏱ Estimated wait: *~{wait_minutes} minutes*\n\n"
+            f"⏱ Estimated wait: *~{wait_text} minutes*\n\n"
             f"We'll notify you when it's ready for pickup."
         )
     else:
