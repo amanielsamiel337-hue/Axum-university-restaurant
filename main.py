@@ -428,7 +428,7 @@ async def notify_staff_group(bot, order_id, student_name, food_name, quantity, p
 
 def is_restaurant_open():
     now = datetime.now()
-    return 6 <= now.hour < 22
+    return 6 <= now.hour < 19
 
 # ============================================
 # AI BRAIN
@@ -442,6 +442,10 @@ async def process_message(student_id, student_name, student_message,context):
         f"- {food}: {details['price']} birr ({details['portions_left']} left)"
         for food, details in menu.items()
     ])
+
+    # Block orders outside opening hours
+    if not is_restaurant_open():
+        return "Sorry, the restaurant is closed right now. We are open every day from 6:00 AM to 10:00 PM. Come back then! 🕕"
 
     save_message(student_id, "user", student_message)
     history.append({"role": "user", "content": student_message})
