@@ -428,7 +428,7 @@ async def notify_staff_group(bot, order_id, student_name, food_name, quantity, p
 
 def is_restaurant_open():
     now = datetime.now()
-    return 6 <= now.hour < 18
+    return 6 <= now.hour < 23
 
 # ============================================
 # AI BRAIN
