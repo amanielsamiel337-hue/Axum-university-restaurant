@@ -8,6 +8,7 @@ import sqlite3
 import json
 import os
 from datetime import datetime
+import random
 
 # Load environment variables from .env file
 # This reads your secrets without them appearing in your code
@@ -62,7 +63,8 @@ def setup_database():
             quantity INTEGER NOT NULL,
             price_total REAL NOT NULL,
             status TEXT DEFAULT 'confirmed',
-            timestamp TEXT NOT NULL
+            timestamp TEXT NOT NULL,
+            pickup_code TEXT,
         )
     """)
 
@@ -316,6 +318,22 @@ async def notify_student(bot, student_id, message_text):
         # or never started a chat with it - we handle that gracefully
         print(f"Could not notify student {student_id}: {e}")
         return False
+    
+
+
+
+def generate_pickup_code(order_id):
+    code = str(random.randint(100, 999))
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE orders SET pickup_code = ?
+        WHERE order_id = ?
+    """, (code, order_id))
+    conn.commit()
+    conn.close()
+    return code
+
 
 # ============================================
 # UPDATED FUNCTION — needed to get the
@@ -821,6 +839,57 @@ async def removemenu_command(update: Update,
             "Example: /removemenu Misir Wot"
         )
 
+async def pickup_command(update: Update,
+                         context: ContextTypes.DEFAULT_TYPE):
+    if not is_manager(update.message.from_user.id):
+        await update.message.reply_text("Staff only.")
+        return
+    try:
+        code = context.args[0]
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT order_id, student_name, food_name, 
+                   quantity, status
+            FROM orders WHERE pickup_code = ?
+        """, (code,))
+        row = cursor.fetchone()
+        conn.close()
+
+        if row is None:
+            await update.message.reply_text("❌ Invalid code.")
+            return
+
+        order_id, student_name, food_name, quantity, status = row
+
+        if status == 'collected':
+            await update.message.reply_text(
+                f"⚠️ This order was already collected by {student_name}.")
+            return
+
+        # Mark as collected
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE orders SET status = 'collected'
+            WHERE pickup_code = ?
+        """, (code,))
+        conn.commit()
+        conn.close()
+
+        await update.message.reply_text(
+            f"✅ *Verified!*\n\n"
+            f"👤 {student_name}\n"
+            f"🍲 {food_name} x{quantity}\n"
+            f"Order #{order_id} marked as collected.",
+            parse_mode="Markdown"
+        )
+    except:
+        await update.message.reply_text(
+            "Usage: /pickup [code]\n"
+            "Example: /pickup 492"
+        )
+
 
         
 # ============================================
@@ -875,6 +944,7 @@ async def confirmpay_command(update: Update,
         # Get student info to notify them
         order = get_order_details(order_id)
         student_id, student_name, food_name, quantity = order
+        code = generate_pickup_code(order_id)
         
         await update.message.reply_text(
             f"✅ Order #{order_id} payment confirmed.")
@@ -891,6 +961,8 @@ async def confirmpay_command(update: Update,
             f"Order #{order_id} — {food_name} x{quantity}\n\n"
             f"📊 You are *#{position}* in queue\n"
             f"⏱ {wait_text}\n\n"
+            f"🎫 Your pickup code: *AU-{code}*\n"
+            f"Show this code at the counter when collecting your food."
             f"We'll notify you when it's ready for pickup."
         )
     else:
@@ -983,6 +1055,7 @@ def main():
     app.add_handler(CommandHandler("addmenu", addmenu_command))
     app.add_handler(CommandHandler("updatemenu", updatemenu_command))
     app.add_handler(CommandHandler("removemenu", removemenu_command))
+    app.add_handler(CommandHandler("pickup", pickup_command))
 
     # Free text
     app.add_handler(MessageHandler(filters.TEXT, handle_message))
