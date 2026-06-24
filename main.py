@@ -64,7 +64,7 @@ def setup_database():
             price_total REAL NOT NULL,
             status TEXT DEFAULT 'confirmed',
             timestamp TEXT NOT NULL,
-            pickup_code TEXT,
+            pickup_code TEXT
         )
     """)
 
