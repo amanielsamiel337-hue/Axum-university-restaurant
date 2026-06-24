@@ -938,7 +938,16 @@ async def handle_button(update: Update,
             f"Please come collect it at the counter now."
         )
 
-        # Add collected button so staff can verify pickup
+# Get the pickup code to show to staff
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT pickup_code FROM orders WHERE order_id = ?
+        """, (order_id,))
+        code_row = cursor.fetchone()
+        conn.close()
+        pickup_code = code_row[0] if code_row else "N/A"
+
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(
                 "📦 Mark as Collected",
@@ -949,7 +958,8 @@ async def handle_button(update: Update,
             f"🍲 *Ready for Pickup — #{order_id}*\n\n"
             f"👤 {student_name}\n"
             f"🍲 {food_name} x{quantity}\n\n"
-            f"✅ Student has been notified. Tap below when collected.",
+            f"🎫 Student's pickup code: *AU-{pickup_code}*\n"
+            f"Verify this matches before tapping collected.",
             parse_mode="Markdown",
             reply_markup=keyboard
         )
