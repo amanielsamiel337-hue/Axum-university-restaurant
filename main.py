@@ -156,8 +156,8 @@ def load_menu():
     cursor = conn.cursor()
     cursor.execute("""
         SELECT food_name, price, portions_left
-        FROM menu WHERE
-        available = 1
+        FROM menu
+        WHERE available = 1
     """)
     rows = cursor.fetchall()
     conn.close()
@@ -263,6 +263,36 @@ def update_availability(food_name, available):
     """, (available, food_name))
     conn.commit()
     conn.close()
+
+
+def add_menu_item(food_name, price):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO menu VALUES (?, ?, ?, ?)
+    """, (food_name, price, 999, 1))
+    conn.commit()
+    conn.close()
+
+def update_menu_price(food_name, price):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE menu SET price = ?
+        WHERE food_name = ?
+    """, (price, food_name))
+    conn.commit()
+    conn.close()
+
+def remove_menu_item(food_name):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        DELETE FROM menu WHERE food_name = ?
+    """, (food_name,))
+    conn.commit()
+    conn.close()
+
 
 
     # ============================================
@@ -734,6 +764,64 @@ async def addmanager_command(update: Update,
             "Usage: /addmanager [telegram_id] [name]")
         
 
+
+async def addmenu_command(update: Update,
+                          context: ContextTypes.DEFAULT_TYPE):
+    if not is_manager(update.message.from_user.id):
+        await update.message.reply_text("Staff only.")
+        return
+    try:
+        price = float(context.args[-1])
+        food_name = " ".join(context.args[:-1])
+        add_menu_item(food_name, price)
+        await update.message.reply_text(
+            f"✅ *{food_name}* added to menu at {price} birr.",
+            parse_mode="Markdown"
+        )
+    except:
+        await update.message.reply_text(
+            "Usage: /addmenu [food name] [price]\n"
+            "Example: /addmenu Misir Wot 18"
+        )
+
+async def updatemenu_command(update: Update,
+                             context: ContextTypes.DEFAULT_TYPE):
+    if not is_manager(update.message.from_user.id):
+        await update.message.reply_text("Staff only.")
+        return
+    try:
+        price = float(context.args[-1])
+        food_name = " ".join(context.args[:-1])
+        update_menu_price(food_name, price)
+        await update.message.reply_text(
+            f"✅ *{food_name}* price updated to {price} birr.",
+            parse_mode="Markdown"
+        )
+    except:
+        await update.message.reply_text(
+            "Usage: /updatemenu [food name] [price]\n"
+            "Example: /updatemenu Shiro Wot 15"
+        )
+
+async def removemenu_command(update: Update,
+                             context: ContextTypes.DEFAULT_TYPE):
+    if not is_manager(update.message.from_user.id):
+        await update.message.reply_text("Staff only.")
+        return
+    try:
+        food_name = " ".join(context.args)
+        remove_menu_item(food_name)
+        await update.message.reply_text(
+            f"🗑 *{food_name}* removed from menu.",
+            parse_mode="Markdown"
+        )
+    except:
+        await update.message.reply_text(
+            "Usage: /removemenu [food name]\n"
+            "Example: /removemenu Misir Wot"
+        )
+
+
         
 # ============================================
 # NEW MANAGER COMMAND — /pending
@@ -892,6 +980,9 @@ def main():
     app.add_handler(CommandHandler("addmanager", addmanager_command))
     app.add_handler(CommandHandler("pending", pending_command))
     app.add_handler(CommandHandler("confirmpay", confirmpay_command))
+    app.add_handler(CommandHandler("addmenu", addmenu_command))
+    app.add_handler(CommandHandler("updatemenu", updatemenu_command))
+    app.add_handler(CommandHandler("removemenu", removemenu_command))
 
     # Free text
     app.add_handler(MessageHandler(filters.TEXT, handle_message))
