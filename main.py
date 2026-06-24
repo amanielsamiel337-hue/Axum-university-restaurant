@@ -704,58 +704,6 @@ async def orders_command(update: Update,
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
-async def ready_command(update: Update,
-                        context: ContextTypes.DEFAULT_TYPE):
-    if not is_manager(update.message.from_user.id):
-        await update.message.reply_text("Staff only.")
-        return
-
-    try:
-        order_id = int(context.args[0])
-    except:
-        await update.message.reply_text(
-            "Usage: /ready [order number]")
-        return
-
-    # Get the order details BEFORE marking it ready
-    # We need the student_id to know who to notify
-    order = get_order_details(order_id)
-
-    if order is None:
-        await update.message.reply_text(
-            f"No order found with number {order_id}.")
-        return
-
-    student_id, student_name, food_name, quantity = order
-
-    # Mark it ready in the database - same as before
-    mark_order_ready(order_id)
-
-    # Confirm to the manager
-    await update.message.reply_text(
-        f"✅ Order #{order_id} marked as ready.\n"
-        f"Notifying {student_name} now..."
-    )
-
-    # THE NEW PART - notify the actual student
-    notification_sent = await notify_student(
-        context.bot,
-        student_id,
-        f"🍲 *Your order is ready!*\n\n"
-        f"Order #{order_id} — {food_name} x{quantity}\n"
-        f"Please come collect it at the counter now."
-    )
-
-    # Tell the manager whether it worked
-    if notification_sent:
-        await update.message.reply_text(
-            f"✅ {student_name} has been notified.")
-    else:
-        await update.message.reply_text(
-            f"⚠️ Could not reach {student_name}. "
-            f"They may need to message the bot first."
-        )
-
 async def soldout_command(update: Update,
                           context: ContextTypes.DEFAULT_TYPE):
     if not is_manager(update.message.from_user.id):
@@ -845,59 +793,7 @@ async def removemenu_command(update: Update,
             "Example: /removemenu Misir Wot"
         )
 
-async def pickup_command(update: Update,
-                         context: ContextTypes.DEFAULT_TYPE):
-    if not is_manager(update.message.from_user.id):
-        await update.message.reply_text("Staff only.")
-        return
-    try:
-        code = context.args[0]
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT order_id, student_name, food_name, 
-                   quantity, status
-            FROM orders WHERE pickup_code = ?
-        """, (code,))
-        row = cursor.fetchone()
-        conn.close()
-
-        if row is None:
-            await update.message.reply_text("❌ Invalid code.")
-            return
-
-        order_id, student_name, food_name, quantity, status = row
-
-        if status == 'collected':
-            await update.message.reply_text(
-                f"⚠️ This order was already collected by {student_name}.")
-            return
-
-        # Mark as collected
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE orders SET status = 'collected'
-            WHERE pickup_code = ?
-        """, (code,))
-        conn.commit()
-        conn.close()
-
-        await update.message.reply_text(
-            f"✅ *Verified!*\n\n"
-            f"👤 {student_name}\n"
-            f"🍲 {food_name} x{quantity}\n"
-            f"Order #{order_id} marked as collected.",
-            parse_mode="Markdown"
-        )
-    except:
-        await update.message.reply_text(
-            "Usage: /pickup [code]\n"
-            "Example: /pickup 492"
-        )
-
-
-        
+ 
 # ============================================
 # NEW MANAGER COMMAND — /pending
 # Shows orders waiting for payment verification
@@ -925,54 +821,6 @@ async def pending_command(update: Update,
     
     await update.message.reply_text(text, parse_mode="Markdown")
 
-# ============================================
-# NEW MANAGER COMMAND — /confirmpay
-# Manager runs this AFTER checking their 
-# actual Telebirr app and seeing money arrived
-# ============================================
-
-async def confirmpay_command(update: Update,
-                             context: ContextTypes.DEFAULT_TYPE):
-    if not is_manager(update.message.from_user.id):
-        await update.message.reply_text("Staff only.")
-        return
-    
-    try:
-        order_id = int(context.args[0])
-    except:
-        await update.message.reply_text(
-            "Usage: /confirmpay [order number]")
-        return
-    
-    success, message = confirm_payment(order_id)
-    
-    if success:
-        # Get student info to notify them
-        order = get_order_details(order_id)
-        student_id, student_name, food_name, quantity = order
-        code = generate_pickup_code(order_id)
-        
-        await update.message.reply_text(
-            f"✅ Order #{order_id} payment confirmed.")
-        
-        # Calculate queue position and wait time
-        position = get_queue_position(order_id)
-        wait_minutes = (position - 1) * 25
-        wait_text = "Your order is first in queue! 🎉" if position == 1 else f"Estimated wait: *~{wait_minutes} minutes*"
-
-        # Notify the student their payment worked
-        await notify_student(
-            context.bot, student_id,
-            f"✅ *Payment confirmed!*\n\n"
-            f"Order #{order_id} — {food_name} x{quantity}\n\n"
-            f"📊 You are *#{position}* in queue\n"
-            f"⏱ {wait_text}\n\n"
-            f"🎫 Your pickup code: *AU-{code}*\n"
-            f"Show this code at the counter when collecting your food."
-            f"We'll notify you when it's ready for pickup."
-        )
-    else:
-        await update.message.reply_text(f"⚠️ {message}")
 
 
 # ============================================
@@ -1090,13 +938,20 @@ async def handle_button(update: Update,
             f"Please come collect it at the counter now."
         )
 
-        # Update staff group message — no more buttons needed
+        # Add collected button so staff can verify pickup
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                "📦 Mark as Collected",
+                callback_data=f"collected_{order_id}"
+            )]
+        ])
         await query.edit_message_text(
             f"🍲 *Ready for Pickup — #{order_id}*\n\n"
             f"👤 {student_name}\n"
             f"🍲 {food_name} x{quantity}\n\n"
-            f"✅ Student has been notified.",
-            parse_mode="Markdown"
+            f"✅ Student has been notified. Tap below when collected.",
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
     
     # ── Mark as Collected button ──
@@ -1172,15 +1027,12 @@ def main():
 
     # Manager commands
     app.add_handler(CommandHandler("orders", orders_command))
-    app.add_handler(CommandHandler("ready", ready_command))
     app.add_handler(CommandHandler("soldout", soldout_command))
     app.add_handler(CommandHandler("addmanager", addmanager_command))
     app.add_handler(CommandHandler("pending", pending_command))
-    app.add_handler(CommandHandler("confirmpay", confirmpay_command))
     app.add_handler(CommandHandler("addmenu", addmenu_command))
     app.add_handler(CommandHandler("updatemenu", updatemenu_command))
     app.add_handler(CommandHandler("removemenu", removemenu_command))
-    app.add_handler(CommandHandler("pickup", pickup_command))
 
     # Free text
     # Inline button callbacks
