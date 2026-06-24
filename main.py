@@ -1098,7 +1098,36 @@ async def handle_button(update: Update,
             f"✅ Student has been notified.",
             parse_mode="Markdown"
         )
+    
+    # ── Mark as Collected button ──
+    elif data.startswith("collected_"):
+        order_id = int(data.split("_")[1])
+        order = get_order_details(order_id)
 
+        if order is None:
+            await query.answer("Order not found.", show_alert=True)
+            return
+
+        student_id, student_name, food_name, quantity = order
+
+        # Mark as collected in database
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE orders SET status = 'collected'
+            WHERE order_id = ?
+        """, (order_id,))
+        conn.commit()
+        conn.close()
+
+        # Final update — no more buttons
+        await query.edit_message_text(
+            f"✅ *Collected — #{order_id}*\n\n"
+            f"👤 {student_name}\n"
+            f"🍲 {food_name} x{quantity}\n\n"
+            f"Order complete.",
+            parse_mode="Markdown"
+        )
 
 # ============================================
 # MESSAGE HANDLER
