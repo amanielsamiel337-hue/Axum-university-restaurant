@@ -1,7 +1,7 @@
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (Application, MessageHandler,
-                          CommandHandler, filters,
-                          ContextTypes)
+                          CommandHandler, CallbackQueryHandler,
+                          filters, ContextTypes)
 from groq import Groq
 from dotenv import load_dotenv
 import sqlite3
@@ -447,24 +447,30 @@ def get_awaiting_payment_orders():
 
 async def notify_staff_group(bot, order_id, student_name, food_name, quantity, price_total):
     if not STAFF_GROUP_ID:
-        # If no group is set up yet, silently skip
-        # This way the bot still works even before the group is ready
         return
-    
+
+    # Inline button — manager taps instead of typing /confirmpay
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "✅ Confirm Payment",
+            callback_data=f"confirmpay_{order_id}"
+        )]
+    ])
+
     message = (
         f"🆕 *New Order — #{order_id}*\n\n"
         f"👤 {student_name}\n"
         f"🍲 {food_name} x{quantity}\n"
         f"💰 {price_total} birr\n\n"
-        f"💳 Awaiting payment — check your Telebirr app\n"
-        f"Then use: /confirmpay {order_id}"
+        f"💳 Check Telebirr, then tap the button below."
     )
-    
+
     try:
         await bot.send_message(
             chat_id=STAFF_GROUP_ID,
             text=message,
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
     except Exception as e:
         print(f"Could not notify staff group: {e}")
@@ -949,7 +955,7 @@ async def confirmpay_command(update: Update,
         await update.message.reply_text(
             f"✅ Order #{order_id} payment confirmed.")
         
-# Calculate queue position and wait time
+        # Calculate queue position and wait time
         position = get_queue_position(order_id)
         wait_minutes = (position - 1) * 25
         wait_text = "Your order is first in queue! 🎉" if position == 1 else f"Estimated wait: *~{wait_minutes} minutes*"
@@ -1002,6 +1008,96 @@ async def handle_photo(update: Update,
         except Exception as e:
             print(f"Could not forward screenshot: {e}")
 
+
+
+# ============================================
+# INLINE BUTTON HANDLER
+# Handles button taps from the staff group
+# ============================================
+
+async def handle_button(update: Update,
+                        context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    # Only managers can use these buttons
+    if not is_manager(query.from_user.id):
+        await query.answer("Staff only.", show_alert=True)
+        return
+
+    data = query.data
+
+    # ── Confirm Payment button ──
+    if data.startswith("confirmpay_"):
+        order_id = int(data.split("_")[1])
+        success, message = confirm_payment(order_id)
+
+        if success:
+            order = get_order_details(order_id)
+            student_id, student_name, food_name, quantity = order
+            code = generate_pickup_code(order_id)
+            position = get_queue_position(order_id)
+            wait_minutes = (position - 1) * 25
+            wait_text = "Your order is first in queue! 🎉" if position == 1 else f"Estimated wait: ~{wait_minutes} minutes"
+
+            # Notify student
+            await notify_student(
+                context.bot, student_id,
+                f"✅ *Payment confirmed!*\n\n"
+                f"Order #{order_id} — {food_name} x{quantity}\n\n"
+                f"📊 You are *#{position}* in queue\n"
+                f"⏱ {wait_text}\n\n"
+                f"🎫 Your pickup code: *AU-{code}*\n"
+                f"Show this code at the counter when collecting your food.\n"
+                f"We'll notify you when it's ready for pickup."
+            )
+
+            # Update the staff group message with Mark Ready button
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton(
+                    "🍲 Mark as Ready",
+                    callback_data=f"ready_{order_id}"
+                )]
+            ])
+            await query.edit_message_text(
+                f"✅ *Payment Confirmed — #{order_id}*\n\n"
+                f"👤 {student_name}\n"
+                f"🍲 {food_name} x{quantity}\n\n"
+                f"Tap below when food is ready.",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+        else:
+            await query.answer(message, show_alert=True)
+
+    # ── Mark as Ready button ──
+    elif data.startswith("ready_"):
+        order_id = int(data.split("_")[1])
+        order = get_order_details(order_id)
+
+        if order is None:
+            await query.answer("Order not found.", show_alert=True)
+            return
+
+        student_id, student_name, food_name, quantity = order
+        mark_order_ready(order_id)
+
+        # Notify student food is ready
+        await notify_student(
+            context.bot, student_id,
+            f"🍲 *Your order is ready!*\n\n"
+            f"Order #{order_id} — {food_name} x{quantity}\n"
+            f"Please come collect it at the counter now."
+        )
+
+        # Update staff group message — no more buttons needed
+        await query.edit_message_text(
+            f"🍲 *Ready for Pickup — #{order_id}*\n\n"
+            f"👤 {student_name}\n"
+            f"🍲 {food_name} x{quantity}\n\n"
+            f"✅ Student has been notified.",
+            parse_mode="Markdown"
+        )
 
 
 # ============================================
@@ -1058,6 +1154,8 @@ def main():
     app.add_handler(CommandHandler("pickup", pickup_command))
 
     # Free text
+    # Inline button callbacks
+    app.add_handler(CallbackQueryHandler(handle_button))
     app.add_handler(MessageHandler(filters.TEXT, handle_message))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
