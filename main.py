@@ -692,12 +692,14 @@ IMPORTANT — DO NOT REPEAT PAST ORDERS:
                     + "\n".join(saved_lines)
                     + f"\n\n💰 *Total: {running_total} birr*\n\n"
                     + "\n".join(problem_lines) + ("\n\n" if problem_lines else "")
-                    + f"💳 *To confirm your order, pay now:*\n"
+                   + f"💳 *To confirm your order, pay now:*\n"
                     f"Send {running_total} birr via Telebirr to:\n"
                     f"*{RESTAURANT_TELEBIRR_NUMBER}*\n"
                     f"({RESTAURANT_NAME})\n\n"
-                    f"After paying, send me your transaction ID or a screenshot, "
-                    f"mentioning Order {ids_text}"
+                    f"⚠️ *Your order is NOT confirmed until you send proof of payment.*\n"
+                    f"After paying, you MUST send me a screenshot or your transaction ID, "
+                    f"otherwise we will not see your order "
+                    f"and it will not be prepared."
                 )
             else:
                 # Nothing could be saved at all
