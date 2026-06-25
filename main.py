@@ -583,7 +583,7 @@ async def process_message(student_id, student_name, student_message,context):
                     confirmed order yet, a plain 1-2 sentence reply with no labels. Nothing else,
                     ever, comes before it.
 
-IMPORTANT — PARTIAL ORDERS:
+                    IMPORTANT — PARTIAL ORDERS:
                     - Process EACH requested dish independently, one at a time. For each dish,
                     decide only two things: (1) is it valid and in stock? (2) what quantity?
                     - Put every valid, in-stock dish into ORDER_JSON. Do this for ALL valid dishes
@@ -619,14 +619,26 @@ IMPORTANT — PARTIAL ORDERS:
 
                     Student: "what do you have today"
                     What's on today's menu, no ORDER_JSON — just answer normally in 1-2 sentences.
-                    IMPORTANT — DO NOT REPEAT PAST ORDERS:
+IMPORTANT — DO NOT REPEAT PAST ORDERS:
                     - Only output ORDER_JSON when the student's CURRENT message is itself a new,
                     clear food request.
                     - A greeting, thank-you, question, or any message that is not a new food
                     request must NEVER produce ORDER_JSON — even if earlier messages in this
                     conversation already contain an order.
                     - Treat every past order already shown in the conversation as placed and
-                    closed. Never re-emit it just because it appears in history."""
+                    closed. Never re-emit it just because it appears in history.
+                    - EACH message is a SEPARATE, independent order — never a running cart. Even
+                    if the student says "also", "and", or "add" — this means "also add THIS NEW
+                    item as its own separate order", NOT "repeat my previous order plus this".
+                    - ORDER_JSON must ONLY ever contain dishes mentioned in the CURRENT message.
+                    NEVER include a dish in ORDER_JSON just because it was named in a previous
+                    turn's text, even if the student says "also".
+
+                    EXAMPLE — "also" means a new separate order, not a repeat of the old one:
+                    [Previous turn already confirmed Shiro Wot and Key Wot]
+                    Student: "also key wot with injera and tikel gomen only"
+                    FRIENDLY: Got it — adding Key Wot with injera and Tikel Gomen only as a new order.
+                    ORDER_JSON: [{{"food_name": "Key Wot with Injera", "quantity": 1}}, {{"food_name": "Tikel Gomen only", "quantity": 1}}]"""
                 }
             ] + history
         )
