@@ -191,7 +191,18 @@ def load_conversation(student_id):
     """, (student_id,))
     rows = cursor.fetchall()
     conn.close()
-    return [{"role": r[0], "content": r[1]} for r in rows]
+
+    cleaned = []
+    for role, content in rows:
+        if role == "assistant" and "ORDER_JSON" in content:
+            # Don't replay our own structured order output back to the model.
+            # Seeing it in history makes the model prone to repeating it
+            # on the next unrelated message (e.g. "hi").
+            content = content.split("📝 Order")[0].strip()
+            if not content:
+                content = "Order placed."
+        cleaned.append({"role": role, "content": content})
+    return cleaned
 
 
 def save_order(student_id, student_name, food_name, quantity, price_total):
@@ -572,7 +583,15 @@ async def process_message(student_id, student_name, student_message,context):
                     ORDER_JSON: {{"food_name": "Misir Wot", "quantity": 2}}
 
                     Student: "what do you have today"
-                    What's on today's menu, no ORDER_JSON — just answer normally in 1-2 sentences."""
+                    What's on today's menu, no ORDER_JSON — just answer normally in 1-2 sentences.
+                    IMPORTANT — DO NOT REPEAT PAST ORDERS:
+                    - Only output ORDER_JSON when the student's CURRENT message is itself a new,
+                    clear food request.
+                    - A greeting, thank-you, question, or any message that is not a new food
+                    request must NEVER produce ORDER_JSON — even if earlier messages in this
+                    conversation already contain an order.
+                    - Treat every past order already shown in the conversation as placed and
+                    closed. Never re-emit it just because it appears in history."""
                 }
             ] + history
         )
@@ -938,7 +957,7 @@ async def handle_button(update: Update,
             f"Please come collect it at the counter now."
         )
 
-# Get the pickup code to show to staff
+        # Get the pickup code to show to staff
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
