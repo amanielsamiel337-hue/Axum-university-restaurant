@@ -618,12 +618,6 @@ async def process_message(student_id, student_name, student_message,context):
                     student_id, student_name, 
                     food_name, quantity, price)
                 
-                # Notify staff group the moment order is placed
-                await notify_staff_group(
-                    context.bot, order_id, student_name,
-                    food_name, quantity, price
-                )
-
 
                 final_reply = (
                     f"{friendly}\n\n"
@@ -847,7 +841,6 @@ async def pending_command(update: Update,
 # When a student sends a payment screenshot,
 # forward it to the staff group automatically
 # ============================================
-
 async def handle_photo(update: Update,
                        context: ContextTypes.DEFAULT_TYPE):
     student_name = update.message.from_user.first_name or "Student"
@@ -858,23 +851,45 @@ async def handle_photo(update: Update,
         "📸 Screenshot received! Staff will verify your payment shortly."
     )
 
-    # Forward the photo to the staff group
-    if STAFF_GROUP_ID:
-        try:
-            await context.bot.forward_message(
-                chat_id=STAFF_GROUP_ID,
-                from_chat_id=update.effective_chat.id,
-                message_id=update.message.message_id
-            )
-            # Send a note so staff knows who sent it
-            await context.bot.send_message(
-                chat_id=STAFF_GROUP_ID,
-                text=f"👆 Payment screenshot from *{student_name}*",
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            print(f"Could not forward screenshot: {e}")
+    if not STAFF_GROUP_ID:
+        return
 
+    # Find this student's most recent order still awaiting payment,
+    # so we know which order this screenshot is probably for
+    orders = get_student_orders(student_id)
+    awaiting = [o for o in orders if o[4] == "awaiting_payment"]
+
+    keyboard = None
+    order_label = "unknown order"
+    if awaiting:
+        # Most recent awaiting order (orders are already ordered DESC by timestamp)
+        order_id, food_name, quantity, price_total, status, timestamp = awaiting[0]
+        order_label = f"#{order_id} — {food_name} x{quantity} ({price_total} birr)"
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                "✅ Confirm Payment",
+                callback_data=f"confirmpay_{order_id}"
+            )]
+        ])
+
+    try:
+        await context.bot.forward_message(
+            chat_id=STAFF_GROUP_ID,
+            from_chat_id=update.effective_chat.id,
+            message_id=update.message.message_id
+        )
+        await context.bot.send_message(
+            chat_id=STAFF_GROUP_ID,
+            text=(
+                f"👆 Payment screenshot from *{student_name}*\n"
+                f"🧾 Order {order_label}\n\n"
+                f"💳 Check Telebirr, then tap below."
+            ),
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        print(f"Could not forward screenshot: {e}")
 
 
 # ============================================
