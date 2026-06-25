@@ -577,6 +577,24 @@ async def process_message(student_id, student_name, student_message,context):
                     - If there is no clear, confirmed order yet, respond in 1–2 sentences only, with no FRIENDLY
                     or ORDER_JSON labels at all.
 
+                    IMPORTANT — OUTPUT DISCIPLINE:
+                    - Never write any draft, explanation, or reasoning before the FRIENDLY line.
+                    Your entire response must start with either FRIENDLY: or, if there's no
+                    confirmed order yet, a plain 1-2 sentence reply with no labels. Nothing else,
+                    ever, comes before it.
+
+                    IMPORTANT — PARTIAL ORDERS:
+                    - If a student requests multiple dishes and SOME are clearly orderable but
+                    ONE has a problem (not enough portions, not on the menu), do NOT block the
+                    entire order. Confirm the valid dishes with ORDER_JSON as normal, and mention
+                    the problem dish only in your FRIENDLY sentence, e.g. "I can do the Shiro Wot
+                    and Key Wot, but Tikel Gomen only has 12 left, not 20 — want me to put in 12
+                    instead?"
+                    - Only include the dishes that are valid and available in ORDER_JSON. Leave
+                    out the problem dish entirely until the student clarifies it.
+                    - Only skip ORDER_JSON completely (for the whole message) if NONE of the
+                    requested dishes can be confirmed at all.
+
                     EXAMPLES:
                     Student: "shiro only please"  (menu has "Shiro Wot")
                     FRIENDLY: Sure! One Shiro Wot, no injera — got it!
