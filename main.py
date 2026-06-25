@@ -179,7 +179,6 @@ def save_message(student_id, role, content):
           datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit()
     conn.close()
-
 def load_conversation(student_id):
     conn = get_connection()
     cursor = conn.cursor()
@@ -194,13 +193,13 @@ def load_conversation(student_id):
 
     cleaned = []
     for role, content in rows:
-        if role == "assistant" and "ORDER_JSON" in content:
-            # Don't replay our own structured order output back to the model.
-            # Seeing it in history makes the model prone to repeating it
-            # on the next unrelated message (e.g. "hi").
-            content = content.split("📝 Order")[0].strip()
-            if not content:
-                content = "Order placed."
+        if role == "assistant" and "📝 Order" in content:
+            # Strip dish names entirely from history. The model was using its
+            # own past FRIENDLY sentence (which names dishes) to "continue"
+            # orders when the student said "also" or "add" — even though each
+            # message must be a fully independent order. Giving it nothing to
+            # copy from is more reliable than instructing it not to copy.
+            content = "Order placed successfully for the student."
         cleaned.append({"role": role, "content": content})
     return cleaned
 
