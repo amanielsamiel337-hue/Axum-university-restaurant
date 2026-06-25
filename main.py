@@ -612,7 +612,6 @@ async def process_message(student_id, student_name, student_message,context):
         print(f"AI error: {e}")
         ai_reply = "Sorry, I am having trouble right now. Please try again in a moment."
 
-
     if "ORDER_JSON:" in ai_reply:
         parts = ai_reply.split("ORDER_JSON:")
         friendly = parts[0].replace("FRIENDLY:", "").strip()
@@ -673,6 +672,9 @@ async def process_message(student_id, student_name, student_message,context):
             final_reply = friendly if friendly else ai_reply
     else:
         final_reply = ai_reply
+
+    save_message(student_id, "assistant", final_reply)
+    return final_reply
 
 # ============================================
 # STUDENT COMMANDS
