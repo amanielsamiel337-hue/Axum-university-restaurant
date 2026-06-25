@@ -564,10 +564,14 @@ async def process_message(student_id, student_name, student_message,context):
                     Instead ask a short clarifying question, e.g. "We don't have that — did you mean Shiro Wot or Misir Wot?"
 
                     OUTPUT FORMAT RULES:
-                    - When a student places a CLEAR order matching exactly one menu item, respond in EXACTLY this
+                    - When a student places a CLEAR order matching one or more menu items, respond in EXACTLY this
                     format and nothing else — no text before FRIENDLY, no text after ORDER_JSON:
                     FRIENDLY: [short warm confirmation, you may mention injera here]
-                    ORDER_JSON: {{"food_name": "exact menu name", "quantity": 1}}
+                    ORDER_JSON: [{{"food_name": "exact menu name", "quantity": 1}}]
+                    - ORDER_JSON is ALWAYS a JSON array/list, even when there is only one item.
+                    Never output a bare object — always wrap it in [ ].
+                    - If the student orders multiple different dishes in one message, include one
+                    object per dish inside the same array.
                     - Both lines are required together every time an order is confirmed. Never send ORDER_JSON
                     without the FRIENDLY line above it. Never send ORDER_JSON alone.
                     - If there is no clear, confirmed order yet, respond in 1–2 sentences only, with no FRIENDLY
@@ -576,11 +580,16 @@ async def process_message(student_id, student_name, student_message,context):
                     EXAMPLES:
                     Student: "shiro only please"  (menu has "Shiro Wot")
                     FRIENDLY: Sure! One Shiro Wot, no injera — got it!
-                    ORDER_JSON: {{"food_name": "Shiro Wot", "quantity": 1}}
+                    ORDER_JSON: [{{"food_name": "Shiro Wot", "quantity": 1}}]
 
                     Student: "misir wot with injera, 2"  (menu has "Misir Wot")
                     FRIENDLY: Great choice! Two Misir Wot with injera coming up.
-                    ORDER_JSON: {{"food_name": "Misir Wot", "quantity": 2}}
+                    ORDER_JSON: [{{"food_name": "Misir Wot", "quantity": 2}}]
+
+                    Student: "one shiro wot and one key wot with injera"
+                    (menu has "Shiro Wot" and "Key Wot with Injera")
+                    FRIENDLY: Got it! One Shiro Wot and one Key Wot with injera, coming right up.
+                    ORDER_JSON: [{{"food_name": "Shiro Wot", "quantity": 1}}, {{"food_name": "Key Wot with Injera", "quantity": 1}}]
 
                     Student: "what do you have today"
                     What's on today's menu, no ORDER_JSON — just answer normally in 1-2 sentences.
@@ -603,44 +612,67 @@ async def process_message(student_id, student_name, student_message,context):
         print(f"AI error: {e}")
         ai_reply = "Sorry, I am having trouble right now. Please try again in a moment."
 
+
     if "ORDER_JSON:" in ai_reply:
         parts = ai_reply.split("ORDER_JSON:")
         friendly = parts[0].replace("FRIENDLY:", "").strip()
         try:
-            order_data = json.loads(parts[1].strip())
-            food_name = order_data["food_name"]
-            quantity = order_data["quantity"]
+            order_items = json.loads(parts[1].strip())
+
+            # Be tolerant — if the model ever slips and sends a single
+            # object instead of a list, just wrap it so the loop still works
+            if isinstance(order_items, dict):
+                order_items = [order_items]
+
             menu = load_menu()
 
-            if food_name in menu and menu[food_name]["portions_left"] >= quantity:
-                price = menu[food_name]["price"] * quantity
-                order_id = save_order(
-                    student_id, student_name, 
-                    food_name, quantity, price)
-                
+            saved_lines = []      # one line per successfully saved item
+            problem_lines = []    # one line per item that couldn't be saved
+            order_ids = []
+            running_total = 0
 
+            for item in order_items:
+                food_name = item["food_name"]
+                quantity = item["quantity"]
+
+                if food_name in menu and menu[food_name]["portions_left"] >= quantity:
+                    price = menu[food_name]["price"] * quantity
+                    order_id = save_order(
+                        student_id, student_name,
+                        food_name, quantity, price)
+
+                    order_ids.append(order_id)
+                    running_total += price
+                    saved_lines.append(
+                        f"📝 Order #{order_id} — {food_name} x{quantity} — {price} birr"
+                    )
+                else:
+                    problem_lines.append(f"⚠️ Sorry, {food_name} is not available right now.")
+
+            if saved_lines:
+                ids_text = ", ".join(f"#{i}" for i in order_ids)
                 final_reply = (
                     f"{friendly}\n\n"
-                    f"📝 Order #{order_id} reserved\n"
-                    f"🍲 {food_name} x{quantity}\n"
-                    f"💰 Total: {price} birr\n\n"
-                    f"💳 *To confirm your order, pay now:*\n"
-                    f"Send {price} birr via Telebirr to:\n"
+                    + "\n".join(saved_lines)
+                    + f"\n\n💰 *Total: {running_total} birr*\n\n"
+                    + "\n".join(problem_lines) + ("\n\n" if problem_lines else "")
+                    + f"💳 *To confirm your order, pay now:*\n"
+                    f"Send {running_total} birr via Telebirr to:\n"
                     f"*{RESTAURANT_TELEBIRR_NUMBER}*\n"
                     f"({RESTAURANT_NAME})\n\n"
-                    f"After paying, send me your transaction ID "
-                    f"or a screenshot, mentioning Order #{order_id}"
+                    f"After paying, send me your transaction ID or a screenshot, "
+                    f"mentioning Order {ids_text}"
                 )
             else:
-                final_reply = "Sorry, that item is not available right now."
+                # Nothing could be saved at all
+                final_reply = "\n".join(problem_lines) if problem_lines else \
+                    "Sorry, that item is not available right now."
+
         except Exception as e:
             print(f"Order processing error: {e}")
             final_reply = friendly if friendly else ai_reply
     else:
         final_reply = ai_reply
-
-    save_message(student_id, "assistant", final_reply)
-    return final_reply
 
 # ============================================
 # STUDENT COMMANDS
