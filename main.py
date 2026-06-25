@@ -583,17 +583,25 @@ async def process_message(student_id, student_name, student_message,context):
                     confirmed order yet, a plain 1-2 sentence reply with no labels. Nothing else,
                     ever, comes before it.
 
-                    IMPORTANT — PARTIAL ORDERS:
-                    - If a student requests multiple dishes and SOME are clearly orderable but
-                    ONE has a problem (not enough portions, not on the menu), do NOT block the
-                    entire order. Confirm the valid dishes with ORDER_JSON as normal, and mention
-                    the problem dish only in your FRIENDLY sentence, e.g. "I can do the Shiro Wot
-                    and Key Wot, but Tikel Gomen only has 12 left, not 20 — want me to put in 12
-                    instead?"
-                    - Only include the dishes that are valid and available in ORDER_JSON. Leave
-                    out the problem dish entirely until the student clarifies it.
-                    - Only skip ORDER_JSON completely (for the whole message) if NONE of the
-                    requested dishes can be confirmed at all.
+IMPORTANT — PARTIAL ORDERS:
+                    - Process EACH requested dish independently, one at a time. For each dish,
+                    decide only two things: (1) is it valid and in stock? (2) what quantity?
+                    - Put every valid, in-stock dish into ORDER_JSON. Do this for ALL valid dishes
+                    in the message — never silently drop one just because another dish has a
+                    problem.
+                    - For a dish that has a problem (not enough portions, unclear match), leave
+                    it OUT of ORDER_JSON, and add ONE short, separate sentence about it.
+                    - Keep your FRIENDLY text SHORT and LIST-LIKE — one short phrase per dish,
+                    not one long run-on sentence. Do not re-explain "only" vs "with injera" back
+                    to the student; just confirm the dish name as matched.
+
+                    EXAMPLE — three dishes, one with a portion problem:
+                    Student: "shiro wot with injera, key wot only x2, and tikel gomen with injera x9"
+                    (menu: Shiro Wot with Injera available; Key Wot only available;
+                    Tikel Gomen with Injera only has 5 left)
+                    FRIENDLY: Got it — Shiro Wot with injera, and 2x Key Wot only. For Tikel Gomen
+                    with injera, we only have 5 left, not 9 — want me to put in 5 instead?
+                    ORDER_JSON: [{{"food_name": "Shiro Wot with Injera", "quantity": 1}}, {{"food_name": "Key Wot only", "quantity": 2}}]
 
                     EXAMPLES:
                     Student: "shiro only please"  (menu has "Shiro Wot")
