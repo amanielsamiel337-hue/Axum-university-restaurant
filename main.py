@@ -354,7 +354,7 @@ def get_order_details(order_id):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT student_id, student_name, food_name, quantity
+        SELECT student_id, student_name, food_name, quantity, price_total
         FROM orders
         WHERE order_id = ?
     """, (order_id,))
@@ -922,8 +922,8 @@ async def forward_screenshot_to_staff(bot, update, student_name, order_id):
     order = get_order_details(order_id)
     if order is None:
         return
-    _, _, food_name, quantity = order
-    order_label = f"#{order_id} — {food_name} x{quantity}"
+    _, _, food_name, quantity, price_total = order
+    order_label = f"#{order_id} — {food_name} x{quantity} — {price_total} birr"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(
@@ -958,8 +958,8 @@ async def forward_screenshot_with_id(bot, chat_id, message_id, student_name, ord
     order = get_order_details(order_id)
     if order is None:
         return
-    _, _, food_name, quantity = order
-    order_label = f"#{order_id} — {food_name} x{quantity}"
+    _, _, food_name, quantity, price_total = order
+    order_label = f"#{order_id} — {food_name} x{quantity} — {price_total} birr"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(
@@ -1080,7 +1080,7 @@ async def handle_button(update: Update,
 
         if success:
             order = get_order_details(order_id)
-            student_id, student_name, food_name, quantity = order
+            student_id, student_name, food_name, quantity, price_total = order
             code = generate_pickup_code(order_id)
             position = get_queue_position(order_id)
             wait_minutes = (position - 1) * 25
@@ -1125,7 +1125,7 @@ async def handle_button(update: Update,
             await query.answer("Order not found.", show_alert=True)
             return
 
-        student_id, student_name, food_name, quantity = order
+        student_id, student_name, food_name, quantity, price_total = order
         mark_order_ready(order_id)
 
         # Notify student food is ready
