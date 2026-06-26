@@ -914,44 +914,67 @@ async def pending_command(update: Update,
 # When a student sends a payment screenshot,
 # forward it to the staff group automatically
 # ============================================
-async def handle_photo(update: Update,
-                       context: ContextTypes.DEFAULT_TYPE):
-    student_name = update.message.from_user.first_name or "Student"
-    student_id = str(update.message.from_user.id)
 
-    # Tell the student we got it
-    await update.message.reply_text(
-        "📸 Screenshot received! Staff will verify your payment shortly."
-    )
-
+async def forward_screenshot_to_staff(bot, update, student_name, order_id):
     if not STAFF_GROUP_ID:
         return
 
-    # Find this student's most recent order still awaiting payment,
-    # so we know which order this screenshot is probably for
-    orders = get_student_orders(student_id)
-    awaiting = [o for o in orders if o[4] == "awaiting_payment"]
+    order = get_order_details(order_id)
+    if order is None:
+        return
+    _, _, food_name, quantity = order
+    order_label = f"#{order_id} — {food_name} x{quantity}"
 
-    keyboard = None
-    order_label = "unknown order"
-    if awaiting:
-        # Most recent awaiting order (orders are already ordered DESC by timestamp)
-        order_id, food_name, quantity, price_total, status, timestamp = awaiting[0]
-        order_label = f"#{order_id} — {food_name} x{quantity} ({price_total} birr)"
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton(
-                "✅ Confirm Payment",
-                callback_data=f"confirmpay_{order_id}"
-            )]
-        ])
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "✅ Confirm Payment",
+            callback_data=f"confirmpay_{order_id}"
+        )]
+    ])
 
     try:
-        await context.bot.forward_message(
+        await bot.forward_message(
             chat_id=STAFF_GROUP_ID,
             from_chat_id=update.effective_chat.id,
             message_id=update.message.message_id
         )
-        await context.bot.send_message(
+        await bot.send_message(
+            chat_id=STAFF_GROUP_ID,
+            text=(
+                f"👆 Payment screenshot from *{student_name}*\n"
+                f"🧾 Order {order_label}\n\n"
+                f"💳 Check Telebirr, then tap below."
+            ),
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        print(f"Could not forward screenshot: {e}")
+
+async def forward_screenshot_with_id(bot, chat_id, message_id, student_name, order_id):
+    if not STAFF_GROUP_ID:
+        return
+
+    order = get_order_details(order_id)
+    if order is None:
+        return
+    _, _, food_name, quantity = order
+    order_label = f"#{order_id} — {food_name} x{quantity}"
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "✅ Confirm Payment",
+            callback_data=f"confirmpay_{order_id}"
+        )]
+    ])
+
+    try:
+        await bot.forward_message(
+            chat_id=STAFF_GROUP_ID,
+            from_chat_id=chat_id,
+            message_id=message_id
+        )
+        await bot.send_message(
             chat_id=STAFF_GROUP_ID,
             text=(
                 f"👆 Payment screenshot from *{student_name}*\n"
@@ -965,6 +988,47 @@ async def handle_photo(update: Update,
         print(f"Could not forward screenshot: {e}")
 
 
+async def handle_photo(update: Update,
+                       context: ContextTypes.DEFAULT_TYPE):
+    student_name = update.message.from_user.first_name or "Student"
+    student_id = str(update.message.from_user.id)
+
+    orders = get_student_orders(student_id)
+    awaiting = [o for o in orders if o[4] == "awaiting_payment"]
+
+    if len(awaiting) == 0:
+        await update.message.reply_text(
+            "I don't see any unpaid orders for you right now."
+        )
+        return
+
+    if len(awaiting) == 1:
+        # Only one possible order — behave exactly as before
+        await update.message.reply_text(
+            "📸 Screenshot received! Staff will verify your payment shortly."
+        )
+        order_id = awaiting[0][0]
+        await forward_screenshot_to_staff(
+            context.bot, update, student_name, order_id
+        )
+        return
+
+    # Two or more unpaid orders — ask which one this payment is for
+    context.user_data["pending_screenshot_msg_id"] = update.message.message_id
+
+    buttons = []
+    for o in awaiting:
+        order_id, food_name, quantity, price_total, status, timestamp = o
+        label = f"#{order_id} — {food_name} x{quantity} ({price_total} birr)"
+        buttons.append([InlineKeyboardButton(
+            label, callback_data=f"whichorder_{order_id}"
+        )])
+
+    await update.message.reply_text(
+        "You have more than one unpaid order. Which one is this payment for?",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
 # ============================================
 # INLINE BUTTON HANDLER
 # Handles button taps from the staff group
@@ -975,12 +1039,39 @@ async def handle_button(update: Update,
     query = update.callback_query
     await query.answer()
 
+    data = query.data
+
+    # ── Which order is this screenshot for? ──
+    if data.startswith("whichorder_"):
+        parts = data.split("_")
+        order_id = int(parts[1])
+        student_name = query.from_user.first_name or "Student"
+
+        photo_msg_id = context.user_data.get("pending_screenshot_msg_id")
+
+        await query.edit_message_text(
+            "📸 Got it — thanks! Staff will verify your payment shortly."
+        )
+
+        if photo_msg_id is None:
+            # Safety net: we lost track of the photo somehow
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="Sorry, I lost track of your screenshot. Please send it again."
+            )
+            return
+
+        await forward_screenshot_with_id(
+            context.bot, query.message.chat_id, photo_msg_id,
+            student_name, order_id
+        )
+        context.user_data["pending_screenshot_msg_id"] = None
+        return
+    
     # Only managers can use these buttons
     if not is_manager(query.from_user.id):
         await query.answer("Staff only.", show_alert=True)
         return
-
-    data = query.data
 
     # ── Confirm Payment button ──
     if data.startswith("confirmpay_"):
